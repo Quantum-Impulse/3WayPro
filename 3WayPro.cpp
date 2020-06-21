@@ -16,12 +16,13 @@ using namespace cv;
 
 Mat aTT(Mat mat)
 {
+
 	adaptiveThreshold(mat, mat, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 49, 0);
 
 	return mat;
 }
 
-Mat anaylzeHands(const Mat &mat, bool &temp)
+Mat analyzeHands(Mat &mat, bool &temp)
 {
 	//medianBlur(mat, mat, 3);
 	Mat combined;
@@ -33,10 +34,12 @@ Mat anaylzeHands(const Mat &mat, bool &temp)
 	future<Mat> g = async(launch::async, aTT, bgr[1]);
 	future<Mat> r = async(launch::async, aTT, bgr[2]);
 
-	while (b.wait_for(chrono::seconds(0)) == future_status::timeout
-		&& g.wait_for(chrono::seconds(0)) == future_status::timeout && r.wait_for(chrono::seconds(0)) == future_status::timeout) {}
+	while (!(b.wait_for(chrono::seconds(0)) == future_status::ready)
+		|| !(g.wait_for(chrono::seconds(0)) == future_status::ready) || !(r.wait_for(chrono::seconds(0)) == future_status::ready)) {}
 
 	combined = b.get() + g.get() + r.get();
+
+	temp = false;
 
 	return combined;
 }
@@ -49,6 +52,8 @@ int main()
 
 	VideoCapture cam(0);
 	cam.set(CAP_PROP_EXPOSURE, 20);
+	cam.set(CAP_PROP_AUTO_EXPOSURE, 0);
+	cam.set(CAP_PROP_AUTO_WB, 0);
 
 	while (true)
 	{
@@ -76,7 +81,7 @@ int main()
 		Mat temp;
 		if (gotHands)
 		{
-			temp = anaylzeHands(boxImg, gotHands).clone();
+			temp = analyzeHands(boxImg, gotHands).clone();
 		}
 
 		if (temp.empty() == false)
