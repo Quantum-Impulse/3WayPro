@@ -11,13 +11,31 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
+const double PI = 3.14159265;
+
 using namespace std;
 using namespace cv;
+
+//returns the angle measure of the middle point as a double and degree
+double dAngle(Point pt0, Point pt1, Point pt2)
+{
+	double a = distance(pt0, pt1);
+	double b = distance(pt1, pt2);
+	double c = distance(pt2, pt0);
+	// C2 = A2 + B2 - 2AB cos(c) law of cosine, lowercase are sides, large case are angles. C is opposite angle of c side.
+	double C = acos((pow(a, 2) + pow(b, 2) - pow(c, 2)) / (2 * a * b)) * (180 / PI);
+	return C;
+}
+
+inline double distance(Point pt0, Point pt1)
+{
+	return sqrt(pow(pt1.x - pt0.x, 2) + pow(pt1.y - pt0.y, 2));
+}
 
 Mat aTT(Mat mat)
 {
 
-	adaptiveThreshold(mat, mat, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 69, -6);
+	adaptiveThreshold(mat, mat, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, 85, 11);
 
 	return mat;
 }
@@ -35,8 +53,7 @@ Mat analyzeHands(Mat& mat, bool& temp)
 	future<Mat> r = async(launch::async, aTT, bgr[2]);
 
 	while (!(b.wait_for(chrono::seconds(0)) == future_status::ready)
-		|| !(g.wait_for(chrono::seconds(0)) == future_status::ready) || !(r.wait_for(chrono::seconds(0)) == future_status::ready)) {
-	}
+		|| !(g.wait_for(chrono::seconds(0)) == future_status::ready) || !(r.wait_for(chrono::seconds(0)) == future_status::ready)) {}
 
 	combined = b.get() + g.get() + r.get();
 
@@ -94,9 +111,11 @@ int main()
 		vector<Point> temp2;
 		vector<vector<Point>> contours;
 		vector<vector<Point>> hand;
+		vector<vector<Point>> hulls;
 
 		if (!temp.empty())
 		{
+			medianBlur(temp, temp, 5);
 			findContours(temp, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 			drawContours(img, contours, -1, Scalar(0, 255, 0), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
 			vector<Point> hull;
@@ -106,8 +125,9 @@ int main()
 				if (fabs(contourArea(temp2)) > 1000)
 				{
 					hand.push_back(temp2);
+					convexHull(contours[t], hull);
+					hulls.push_back(hull);
 				}
-				//convexHull(contours[t], );
 
 			}
 
@@ -123,15 +143,59 @@ int main()
 			imshow("Hands", temp);
 		}
 
-		for (size_t i = 0; i < hand.size(); i++)
+		drawContours(img, hand, -1, Scalar(128, 0, 128), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
+		if (!hulls.empty())
 		{
-			Point* p = &hand[i][0];
-			//*p += Point(xmid * .6, ymid * .3);
-			//int n = hand[i].size();
-			//polylines(img, &p, &n, 1, true, Scalar(128, 0, 128), 1, LINE_AA);
-			drawContours(img, hand, -1, Scalar(128, 0, 128), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
-		}
+			drawContours(img, hulls, -1, Scalar(0, 128, 128), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
+			auto thumbangle = dAngle(hulls[0][6], hulls[0][0], hulls[0][1]);
+			auto pointangle = dAngle(hulls[0][0], hulls[0][1], hulls[0][2]);
+			auto middleangle = dAngle(hulls[1][6], hulls[2][0], hulls[3][1]);
+			auto ringangle = dAngle(hulls[2][6], hulls[3][0], hulls[4][1]);
+			auto thumbangle = dAngle(hulls[3][6], hulls[4][0], hulls[5][1]);
 
+			double angles[5] = { thumbangle, pointangle, middleangle, ringangle, thumbangle };
+
+			for (size_t i = 0; i < hulls[0].size(); i++)
+			{
+				double x, y, s;
+				double ra;
+
+				auto &p1 = hulls[0][i], p2 = hulls[0][i + 1];
+				switch (i)
+				{
+				case 0:
+					ra = 360 - angles[i];;
+					break;
+				case 1: 
+					ra = 360 - angles[i];
+					break;
+				case 2:
+					if (tan(atan2(p1.y, p2.y) * (180 / PI)) * (p2.x - p1.x) > tan(atan2(p2.x, -p2.y) * (180 / PI)))
+					{
+						ra = 90 + tan(atan2(p1.y, p2.y) * (180 / PI));
+					}
+					else
+					{
+						ra = 90 - tan(atan2(p2.x, -p2.y);
+					}
+					break;
+				case 5:
+
+
+				default:
+					ra = angles[i];
+					break;
+				}
+				auto a = (p1.x - p2.x) * (tan((angles[0] / 2) * (PI / 180)));
+				auto y3 = a + p1.y;
+				x = p2.x; y = y3;
+
+				line(img, p1, Point(x, y), Scalar(0, 100, 100), 2, LINE_AA);
+			}
+			
+
+		}
+		
 
 		imshow("original", img);
 
