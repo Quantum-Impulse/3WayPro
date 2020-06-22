@@ -154,6 +154,18 @@
     <ClCompile Include="3WayPro.cpp" />
     <ClCompile Include=".cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="3WayPro.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\..\Pictures\240px-Human-Hands-Front-Back.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="bitmap1.bmp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

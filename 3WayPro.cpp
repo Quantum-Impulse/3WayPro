@@ -2,12 +2,16 @@
  Authors: 
 	* Enrique R.
 	* Lance E.
-	* Kieran
+	* Kieran H.
 */
 #include <iostream>
 #include <future>
 #include <chrono>
 #include <algorithm>
+#include "resource.h"
+#include <fstream>
+#include <string>
+#include <Windows.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -16,6 +20,64 @@ const double PI = 3.14159265;
 
 using namespace std;
 using namespace cv;
+
+double xmid, ymid;
+
+ofstream ino;
+ofstream outo;
+
+//based on https://mklimenko.github.io/english/2018/06/23/embed-resources-msvc/
+class Resource
+{
+public:
+	HGLOBAL data;
+	HRSRC h;
+	Resource(int id, LPWSTR type)
+	{
+		h = FindResource(nullptr, MAKEINTRESOURCE(id), type);
+		data = LoadResource(nullptr, h);
+	}
+
+	void* loadFont(Resource fontResource)
+	{
+		return LockResource(fontResource.data);
+	}
+
+	void* loadImage(Resource imageResource)
+	{
+		return LockResource(imageResource.data);
+	}
+};
+
+vector<Rect2d> findFingers(Mat binary)
+{
+	return binary;
+}
+
+vector<Point> FingerSort(vector<Point> finger1, Rect handbox)
+{
+	vector<Point> nps;
+	for (size_t i = 0; i < finger1.size(); i++)
+	{
+		finger1[i].x += xmid * .6;
+		finger1[i].y += ymid * .3;
+		nps.push_back(finger1[i]);
+	}
+
+	double yb = handbox.y + handbox.height / 2;
+
+	for (size_t t = 0; t < nps.size(); t++)
+	{
+		if (nps[t].y > yb)
+		{
+			nps.erase(nps.begin() + t);
+			t = 0;
+			continue;
+		}
+	}
+
+	return nps;
+}
 
 bool CASort(vector<Point> lhs, vector<Point> rhs) { return (contourArea(lhs, true) > contourArea(rhs, true)); }
 
@@ -83,16 +145,30 @@ double dAngle(Point pt0, Point pt1, Point pt2)
 Mat aTT(Mat mat)
 {
 
-	adaptiveThreshold(mat, mat, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY_INV, 79, 0 );
+	adaptiveThreshold(mat, mat, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 79, -4 );
 
 	return mat;
 }
 
-Mat analyzeHands(Mat& mat, bool& temp)
+Mat analyzeHands(Mat mat, bool& temp)
 {
 	medianBlur(mat, mat, 1);
-	//cvtColor(mat, mat, COLOR_BGR2HSV);	
+	cvtColor(mat, mat, COLOR_BGR2HSV);	
 	Mat combined;
+
+
+	auto xmid = mat.cols / 2;
+	auto ymid = mat.rows / 2;
+
+	Vec3b color;
+	color = mat.at<cv::Vec3b>(cv::Point(xmid, ymid));
+	
+	cout << color.val[0] << ' ' << color.val[1] << ' ' << color.val[2];
+
+
+	Scalar values((int)color.val[0], (int) color.val[1], (int) color.val[2]);
+	Mat thresholded;
+	inRange(mat, values - Scalar(115, 55, 55), values + Scalar(115, 55, 55), thresholded);
 
 	Mat bgr[3];
 	split(mat, bgr);
@@ -113,7 +189,7 @@ Mat analyzeHands(Mat& mat, bool& temp)
 
 	temp = false;
 
-	return combined;
+	return thresholded;
 }
 
 int main()
@@ -128,11 +204,13 @@ int main()
 	cam.set(CAP_PROP_AUTO_WB, 0);
 	Mat temp;
 
+	Resource handOutlineR(102, RT_BITMAP);
+	//Mat handOutline(200, 200, CV_8UC4, handOutlineR.loadImage(handOutlineR));
+
 	while (true)
 	{
 		cam.read(img);
 		Mat boxImg;
-		float xmid, ymid;
 		xmid = img.cols / 2;
 		ymid = img.rows / 2;
 
@@ -141,7 +219,12 @@ int main()
 			Rect myRect(Point(xmid * .6, ymid * .3), Point(xmid * 1.4, ymid * 1.7));
 			boxImg = Mat(img, myRect).clone();
 
+			circle(img, Point(xmid, ymid), 3, Scalar(0, 255, 0), 2, LINE_AA);
+
 			rectangle(img, myRect, Scalar(255, 0, 0), 2, LINE_AA);
+
+			//img.setTo(Scalar(50, 50, 200), handOutline);
+
 
 			imshow("BoxInfo", boxImg);
 
@@ -164,8 +247,9 @@ int main()
 
 		if (!temp.empty())
 		{
-			medianBlur(temp, temp, 5);
-			findContours(temp, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+			Mat temp5;
+			medianBlur(temp, temp5, 5);
+			findContours(temp5, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 			drawContours(img, contours, -1, Scalar(0, 255, 0), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
 			vector<Point> hull;
 			for (size_t t = 0; t < contours.size(); t++)
@@ -205,12 +289,12 @@ int main()
 
 			double angles[5] = { thumbangle, pointangle, middleangle, ringangle, thumbangle };
 
-			vector<vector<Point>> fingerpoints(1);
+			vector<vector<Point>> fingerpoints;
 
 			auto g = generalizeHull(hulls[0]);
 			sort(g.begin(), g.end(), LTRSort);
 			size_t j = g.size() - 5;
-
+			fingerpoints.push_back(g);
 			for (size_t i = g.size() - 1; i > j; i--)
 			{ /*
 				double x, y, s;
@@ -267,21 +351,64 @@ int main()
 				m1 = (y2 - y1) / (x2 - x1);
 				m2 = (y3 - y2) / (x3 - x2);
 
-				double b1, b2;
-				b1 = y1 - x1 * m1;
-				b2 = y1 - x1 * m1;
+				double a1, a2;
+				a1 = atan(m1);
+				a2 = atan(m2);
 
-				double bt = sqrt(pow(m1, 2) + 1);
-				double nm1 = m1 * bt, nc = b1 * bt;
-				double ny = (nm1 * x3 + nc);
+				double bis1, bis2;
+				bis1 = (a1 + a2) / 2;
+				bis2 = (a1 + a2 + PI) / 2;
+
+				double m3, m4;
+				m3 = tan(bis1);
+				m4 = tan(bis2);
+
+				double newEq1, newEq2;
+				newEq1 = m3*(2)+y2;
+
+				double b1, b2; 
+				b1 = y2 - (m1 * x2);
+				b2 = y2 - (m2 * x2);
+
+				double A = m1, a = m2, B = 1, b = 1, C = b1, c = b2;
+
+				double bottom1 = sqrt(pow(m1, 2) + 1);
+				double bottom2 = sqrt(pow(m2, 2) + 1);
+
+				double total1 = (A * x2 + B * y2 + C) / (bottom1);
+				double total2 = (a * x2 + b * y2 + c) / (bottom2);
+
+				double nY1 = (total2 / bottom1) - (A * x2) - (y2);
+				double nY2 = (total1 / bottom2) - (a * x2) - (y2);
+				double nY3 = (-total2 / bottom1) - (A * x2) - (y2);
+				double nY4 = (-total1 / bottom2) - (a * x2) - (y2);
 
 				fingerpoints[0].push_back(g[i - 1]);
-				fingerpoints[0].push_back(Point(x3, ny));
+				fingerpoints[0].push_back(Point(x3, nY1));
 
+
+				Rect bbox = boundingRect (g);
+				bbox.x += (xmid * .6);
+				bbox.y += (ymid * .3);
+
+				circle(img, Point(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2), 3, Scalar(0, 0, 0), 3, LINE_AA);
+				string data = "data.csv";
+				
+
+				ino.open(data, ios::out);
+
+				auto fp = FingerSort(g, bbox);
+				for (size_t i = 0; i < fp.size(); i++)
+				{
+					circle(img, fp[i], 3, Scalar(255, 255, 0), 3, LINE_AA);
+					ino << fp[i].x << ',' << fp[i].y << ',';
+				}
+				ino.close();
+				
 
 			}
 			
-			drawContours(img, fingerpoints, -1, Scalar(200, 10, 10), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
+			//drawContours(img, fingerpoints, -1, Scalar(100, 60, 10), 2, LINE_AA, noArray(), 214783647, Point(xmid * .6, ymid * .3));
 
 		}
 		
